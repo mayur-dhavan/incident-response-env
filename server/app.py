@@ -1,11 +1,13 @@
 """
 FastAPI application.
 
-Standard OpenEnv endpoints (provided by create_fastapi_app):
+Standard OpenEnv endpoints (provided by create_app):
   POST /reset
   POST /step
   GET  /state
   GET  /health
+  GET  /schema
+  WS   /ws
 
 Hackathon-required extra endpoints:
   GET  /tasks    — list tasks with action schema
@@ -19,7 +21,7 @@ import copy
 from typing import Any
 
 from fastapi import HTTPException
-from openenv.core.env_server import create_fastapi_app
+from openenv.core.env_server.http_server import create_app
 from pydantic import BaseModel
 
 from ..models import IncidentAction, IncidentObservation, IncidentState
@@ -28,19 +30,20 @@ from .graders import grade
 from .scenarios import ALL_TASKS
 
 # ──────────────────────────────────────────────
-# Shared environment instance for extra endpoints
-# (create_fastapi_app also manages its own instance via the factory)
+# Shared environment instance
+# The factory always returns the same instance so /grader and /state
+# can read episode state after /reset + /step calls.
 # ──────────────────────────────────────────────
 _shared_env = IncidentEnvironment()
 
 
 def _env_factory() -> IncidentEnvironment:
-    """Factory used by create_fastapi_app for its internal session management."""
+    """Factory returned to create_app for session management."""
     return _shared_env
 
 
-# Build the base OpenEnv app (provides /reset /step /state /health /schema)
-app = create_fastapi_app(_env_factory, IncidentAction, IncidentObservation)
+# Build the base OpenEnv app (provides /reset /step /state /health /schema /ws)
+app = create_app(_env_factory, IncidentAction, IncidentObservation, env_name="incident-response-env")
 
 # Override /state to return full IncidentState (base only returns episode_id, step_count)
 # We remove the original route and add our own.
@@ -236,12 +239,19 @@ def run_baseline() -> dict[str, Any]:
 # Entry point for openenv validate / direct execution
 # ──────────────────────────────────────────────
 
-def main() -> None:
-    """Run the server directly (for openenv validate and scripts entry point)."""
-    import uvicorn
+def main(host: str = "0.0.0.0", port: int = 7860) -> None:
+    """Entry point for direct execution via uv run or python -m.
+
+    Enables:
+        uv run server
+        uv run server --port 8001
+    Port default is 7860 to match HF Spaces requirements.
+    Override via PORT env var: PORT=8000 uv run server
+    """
     import os
-    port = int(os.environ.get("PORT", "7860"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    import uvicorn
+    port = int(os.environ.get("PORT", str(port)))
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
