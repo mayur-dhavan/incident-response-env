@@ -21,6 +21,7 @@ import copy
 from typing import Any
 
 from fastapi import HTTPException
+from fastapi.responses import HTMLResponse
 from openenv.core.env_server.http_server import create_app
 from pydantic import BaseModel
 
@@ -48,6 +49,111 @@ app = create_app(_env_factory, IncidentAction, IncidentObservation, env_name="in
 # Override /state to return full IncidentState (base only returns episode_id, step_count)
 # We remove the original route and add our own.
 app.routes[:] = [r for r in app.routes if not (hasattr(r, "path") and r.path == "/state")]
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def root() -> HTMLResponse:
+    """Landing page — shown when you open the HF Space URL in a browser."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Incident Response Env</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+    .container{max-width:860px;margin:0 auto}
+    h1{font-size:2rem;font-weight:700;color:#38bdf8;margin-bottom:.4rem}
+    .subtitle{color:#94a3b8;margin-bottom:2rem;font-size:1.05rem}
+    .badge{display:inline-block;padding:.2rem .6rem;border-radius:9999px;font-size:.75rem;font-weight:600;margin-right:.4rem}
+    .easy{background:#166534;color:#bbf7d0}.medium{background:#92400e;color:#fde68a}.hard{background:#7f1d1d;color:#fecaca}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1.25rem 1.5rem;margin-bottom:1rem}
+    .card h2{font-size:1rem;font-weight:600;color:#f1f5f9;margin-bottom:.5rem}
+    .card p{font-size:.9rem;color:#94a3b8;line-height:1.5}
+    .endpoint{font-family:monospace;background:#0f172a;border:1px solid #334155;border-radius:.375rem;padding:.75rem 1rem;margin:.4rem 0;font-size:.85rem;display:flex;gap:1rem;align-items:baseline}
+    .method{font-weight:700;min-width:3rem}.get{color:#34d399}.post{color:#f59e0b}
+    .path{color:#e2e8f0}.desc{color:#64748b;font-size:.8rem;margin-left:auto}
+    .codeblock{background:#0f172a;border:1px solid #334155;border-radius:.5rem;padding:1rem;font-family:monospace;font-size:.82rem;color:#a5f3fc;overflow-x:auto;margin-top:.75rem}
+    a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin-bottom:1.5rem}
+    .stat{background:#1e293b;border:1px solid #334155;border-radius:.75rem;padding:1rem 1.25rem}
+    .stat-val{font-size:1.75rem;font-weight:700;color:#38bdf8}.stat-label{font-size:.8rem;color:#64748b;margin-top:.2rem}
+    footer{margin-top:2.5rem;text-align:center;color:#475569;font-size:.8rem}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>&#x1F6A8; Incident Response Environment</h1>
+  <p class="subtitle">OpenEnv &mdash; Meta PyTorch Hackathon &bull; Production Server Debugging &bull; Agentic RL Training</p>
+
+  <div class="grid">
+    <div class="stat"><div class="stat-val">3</div><div class="stat-label">Tasks (Easy / Medium / Hard)</div></div>
+    <div class="stat"><div class="stat-val">6</div><div class="stat-label">Action types</div></div>
+    <div class="stat"><div class="stat-val">1.0</div><div class="stat-label">Baseline score (rule-based avg)</div></div>
+    <div class="stat"><div class="stat-val">&#x2714;</div><div class="stat-label">OpenEnv-compatible API</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Tasks</h2>
+    <p style="margin-bottom:.75rem">Each task is a realistic production incident. Agents must diagnose and fix the system.</p>
+    <p><span class="badge easy">EASY</span> <strong>task_1_oom</strong> &mdash; OOM Killer killed the api-server. Logs are clear. Fix: restart.</p>
+    <br/>
+    <p><span class="badge medium">MEDIUM</span> <strong>task_2_leak</strong> &mdash; Worker has a memory leak after bad deploy v2.4.1. Fix: rollback (not restart).</p>
+    <br/>
+    <p><span class="badge hard">HARD</span> <strong>task_3_cascade</strong> &mdash; Full outage. Postgres <code>max_connections=25</code> exhausted. Misleading nginx disk error as a trap. Fix: <code>ALTER SYSTEM SET max_connections = 200</code>.</p>
+  </div>
+
+  <div class="card">
+    <h2>API Endpoints</h2>
+    <div class="endpoint"><span class="method get">GET</span><span class="path">/health</span><span class="desc">Liveness check</span></div>
+    <div class="endpoint"><span class="method get">GET</span><span class="path">/tasks</span><span class="desc">List all tasks + action schema</span></div>
+    <div class="endpoint"><span class="method post">POST</span><span class="path">/reset</span><span class="desc">Start episode &mdash; body: <code>{"task_id":"task_1_oom"}</code></span></div>
+    <div class="endpoint"><span class="method post">POST</span><span class="path">/step</span><span class="desc">Execute action &mdash; body: <code>{"action":{"action_type":"read_logs","target":"api-server"}}</code></span></div>
+    <div class="endpoint"><span class="method get">GET</span><span class="path">/state</span><span class="desc">Full episode state (for graders)</span></div>
+    <div class="endpoint"><span class="method post">POST</span><span class="path">/grader</span><span class="desc">Score current episode</span></div>
+    <div class="endpoint"><span class="method post">POST</span><span class="path">/baseline</span><span class="desc">Run rule-based baseline on all 3 tasks</span></div>
+    <div class="endpoint"><span class="method get">GET</span><span class="path">/docs</span><span class="desc">Interactive Swagger UI</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Quick Start</h2>
+    <div class="codeblock">BASE = "https://mayur6901-incident-response-env.hf.space"
+
+# 1. Start an episode
+curl -X POST $BASE/reset -H "Content-Type: application/json" \\
+     -d '{"task_id": "task_1_oom"}'
+
+# 2. Take an action
+curl -X POST $BASE/step -H "Content-Type: application/json" \\
+     -d '{"action": {"action_type": "read_logs", "target": "api-server"}}'
+
+# 3. Fix the incident
+curl -X POST $BASE/step -H "Content-Type: application/json" \\
+     -d '{"action": {"action_type": "restart_service", "target": "api-server"}}'
+
+# 4. Get your score
+curl -X POST $BASE/grader</div>
+  </div>
+
+  <div class="card">
+    <h2>Run the demo locally</h2>
+    <div class="codeblock">git clone https://github.com/mayur-dhavan/incident-response-env
+cd incident-response-env
+pip install -r requirements.txt
+python demo.py</div>
+    <p style="margin-top:.75rem">Or against this live Space: <code>python demo.py --url https://mayur6901-incident-response-env.hf.space</code></p>
+  </div>
+
+  <footer>
+    <a href="https://github.com/mayur-dhavan/incident-response-env">GitHub</a> &bull;
+    <a href="/docs">Swagger UI</a> &bull;
+    <a href="https://huggingface.co/spaces/mayur6901/incident-response-env">HF Spaces</a>
+  </footer>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 @app.get("/state", response_model=IncidentState)
