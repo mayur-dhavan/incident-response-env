@@ -1,0 +1,63 @@
+from typing import Any, Dict, List, Optional
+
+from openenv.core.env_server import Action, Observation, State
+from pydantic import Field
+
+
+class IncidentAction(Action):
+    """
+    Action an agent can take in the incident response environment.
+
+    action_type: one of
+        "read_logs"       - read recent logs for a service
+        "check_metrics"   - check CPU/memory/connection metrics for a service
+        "restart_service" - restart a service
+        "rollback"        - rollback a service to previous deployment
+        "exec_command"    - run a diagnostic/repair SQL or shell command
+        "check_network"   - check connectivity between two services
+    target: service name or command string
+    parameters: optional extra kwargs (e.g. {"lines": 50} for read_logs)
+    """
+
+    action_type: str = ""
+    target: str = ""
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentObservation(Observation):
+    """
+    What the agent sees after each action.
+
+    output:   human-readable result of the action (log snippet, metric table, etc.)
+    services: current snapshot of every service's health
+    done:     True when episode is over (fix verified or max_steps reached)
+    success:  False only if the action itself was invalid/errored
+    error:    populated when success=False
+    """
+
+    output: str = ""
+    services: Dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    error: str = ""
+    # Note: 'done' and 'reward' are already defined in the parent Observation class
+
+
+class IncidentState(State):
+    """
+    Episode-level tracking used by graders.
+
+    task_id:               which of the 3 tasks is running
+    actions_taken:         ordered list of actions (for grader replay)
+    root_cause_identified: agent issued the correct diagnostic action
+    fix_applied:           correct repair action was taken
+    system_restored:       final system health check passed
+    current_score:         rolling partial-credit score
+    """
+
+    task_id: str = ""
+    actions_taken: List[Dict[str, Any]] = Field(default_factory=list)
+    root_cause_identified: bool = False
+    fix_applied: bool = False
+    system_restored: bool = False
+    current_score: float = 0.0
+    # Note: 'episode_id' and 'step_count' are already defined in the parent State class
