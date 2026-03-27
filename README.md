@@ -120,9 +120,16 @@ uvicorn incident_response_env.server.app:app --port 7860
 # Run baseline (rule-based, no API key needed)
 python incident_response_env/baseline.py --url http://localhost:7860 --rule-based
 
-# Run baseline (LLM, requires OPENAI_API_KEY)
+# Run baseline with Open LLM via HuggingFace Inference (recommended)
+export HF_TOKEN=hf_...
+python incident_response_env/baseline.py --url http://localhost:7860 --provider hf --model meta-llama/Llama-3.1-8B-Instruct
+
+# Run baseline with OpenAI
 export OPENAI_API_KEY=sk-...
-python incident_response_env/baseline.py --url http://localhost:7860 --model gpt-4o-mini
+python incident_response_env/baseline.py --url http://localhost:7860 --provider openai --model gpt-4o-mini
+
+# Run baseline with any OpenAI-compatible endpoint (vLLM, Ollama, etc.)
+python incident_response_env/baseline.py --url http://localhost:7860 --api-base http://localhost:8000/v1 --model my-model
 ```
 
 ### Docker
@@ -150,9 +157,15 @@ The environment is deployed at: https://huggingface.co/spaces/mayur6901/incident
 
 *The rule-based agent uses perfect domain knowledge — it represents the optimal policy.*
 
-### LLM agent (gpt-4o-mini)
+### LLM agent — Open LLMs (Llama 3.1 8B via HF Inference)
 
-Scores will vary by model. The environment is designed so that:
+| Task | Difficulty | Score | Steps | Restored |
+|---|---|---|---|---|
+| OOM Killer | Easy | 1.0000 | 5 | Yes |
+
+*Tested with `meta-llama/Llama-3.1-8B-Instruct` via HuggingFace Inference API (OpenAI-compatible).*
+
+The baseline script works with **any OpenAI-compatible endpoint** — OpenAI, HuggingFace Inference, vLLM, Ollama, etc. Expected score ranges by difficulty:
 - Easy task: most models should score 0.7–1.0
 - Medium task: requires distinguishing cause from symptom (expected 0.5–0.9)
 - Hard task: requires avoiding red herrings and executing SQL (expected 0.3–0.7)
@@ -162,7 +175,7 @@ Scores will vary by model. The environment is designed so that:
 ```
 incident_response_env/
 ├── models.py              # Pydantic Action/Observation/State models
-├── baseline.py            # Baseline inference script (OpenAI API + rule-based)
+├── baseline.py            # Baseline inference script (Open LLM / OpenAI-compatible + rule-based)
 ├── client.py              # EnvClient wrapper for programmatic use
 ├── openenv.yaml           # OpenEnv spec metadata
 ├── pyproject.toml         # Package config + dependencies
@@ -187,7 +200,8 @@ incident_response_env/
 - Per-step reward signal (not just end-of-episode)
 - Clean episode boundaries with `reset()`
 - Dockerfile builds and runs cleanly
-- Baseline script uses OpenAI API client
+- Baseline script works with any OpenAI-compatible LLM (HF Inference, OpenAI, vLLM, etc.)
+- Grader scores vary based on agent strategy (not constant)
 
 ## License
 

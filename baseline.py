@@ -1,13 +1,21 @@
 """
-Baseline inference script — OpenAI API agent.
+Baseline inference script — LLM agent via OpenAI-compatible API.
 
-Runs an LLM (via the OpenAI API) against all 3 incident-response tasks and
-prints reproducible scores.  Falls back to a deterministic rule-based agent
-when OPENAI_API_KEY is not set.
+Runs an LLM against all 3 incident-response tasks and prints reproducible
+scores.  Works with any OpenAI-compatible endpoint: OpenAI, HuggingFace
+Inference, vLLM, Ollama, etc.
+
+Falls back to a deterministic rule-based agent when no API key is available.
 
 Usage:
-    # LLM baseline (requires OPENAI_API_KEY in env)
-    python baseline.py --url http://localhost:7860
+    # Open LLM via HuggingFace Inference (recommended for hackathon eval)
+    python baseline.py --url http://localhost:7860 --provider hf --model meta-llama/Llama-3.1-8B-Instruct
+
+    # OpenAI
+    python baseline.py --url http://localhost:7860 --provider openai --model gpt-4o-mini
+
+    # Any OpenAI-compatible endpoint
+    python baseline.py --url http://localhost:7860 --api-base http://localhost:8000/v1 --api-key sk-...
 
     # Rule-based fallback (no API key needed)
     python baseline.py --url http://localhost:7860 --rule-based
@@ -98,11 +106,12 @@ Return ONLY valid JSON. No markdown, no explanation outside the JSON.
 """
 
 
-def run_llm_episode(base_url: str, task_id: str, model: str) -> tuple[float, int, bool]:
-    """Run LLM agent on one task using OpenAI API, return (score, steps, restored)."""
-    from openai import OpenAI
+def run_llm_episode(base_url: str, task_id: str, model: str, client: "OpenAI | None" = None) -> tuple[float, int, bool]:
+    """Run LLM agent on one task using OpenAI-compatible API, return (score, steps, restored)."""
+    from openai import OpenAI as _OpenAI
 
-    client = OpenAI()  # reads OPENAI_API_KEY from env
+    if client is None:
+        client = _OpenAI()  # fallback: reads OPENAI_API_KEY from env
 
     # Reset
     reset_resp = post(f"{base_url}/reset", {"task_id": task_id})
@@ -116,20 +125,40 @@ def run_llm_episode(base_url: str, task_id: str, model: str) -> tuple[float, int
     max_steps = 15
     steps = 0
     done = False
+    retries = 0  # track consecutive API failures
 
     while not done and steps < max_steps:
         # Ask the LLM for an action
-        completion = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=256,
-        )
-        reply = completion.choices[0].message.content or ""
-
-        # Parse action JSON from LLM response
         try:
-            action = json.loads(reply.strip().strip("`").strip())
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.0,
+                max_tokens=256,
+            )
+            reply = completion.choices[0].message.content or ""
+            retries = 0  # reset on success
+        except Exception as e:
+            retries += 1
+            print(f"\n    [!] LLM API error (attempt {retries}): {e}")
+            if retries >= 3:
+                print("    [!] Too many API errors. Ending episode early.")
+                break
+            import time
+            time.sleep(2 ** retries)
+            continue
+
+        # Parse action JSON from LLM response — handle markdown fences
+        raw = reply.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            raw = "\n".join(lines).strip()
+        raw = raw.strip("`").strip()
+
+        try:
+            action = json.loads(raw)
             if "action_type" not in action:
                 raise ValueError("Missing action_type")
             action.setdefault("target", "")
@@ -164,7 +193,8 @@ def run_llm_episode(base_url: str, task_id: str, model: str) -> tuple[float, int
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-def run_baseline(base_url: str, use_rules: bool = False, model: str = "gpt-4o-mini") -> int:
+def run_baseline(base_url: str, use_rules: bool = False, model: str = "gpt-4o-mini",
+                 client: "Any | None" = None) -> int:
     base_url = base_url.rstrip("/")
 
     mode = "rule-based" if use_rules else f"LLM ({model})"
@@ -201,7 +231,7 @@ def run_baseline(base_url: str, use_rules: bool = False, model: str = "gpt-4o-mi
         if use_rules:
             score, steps, restored = run_rule_episode(base_url, task_id)
         else:
-            score, steps, restored = run_llm_episode(base_url, task_id, model)
+            score, steps, restored = run_llm_episode(base_url, task_id, model, client)
 
         results.append({
             "task_id": task_id,
@@ -255,8 +285,24 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model",
-        default="gpt-4o-mini",
-        help="OpenAI model name (default: gpt-4o-mini)",
+        default="meta-llama/Llama-3.1-8B-Instruct",
+        help="Model name (default: meta-llama/Llama-3.1-8B-Instruct)",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["hf", "openai", "custom"],
+        default=None,
+        help="LLM provider: 'hf' (HuggingFace Inference), 'openai', or 'custom' (use --api-base)",
+    )
+    parser.add_argument(
+        "--api-base",
+        default=None,
+        help="Custom OpenAI-compatible base URL (e.g. http://localhost:8000/v1)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="API key (reads from env if not specified: HF_TOKEN or OPENAI_API_KEY)",
     )
     parser.add_argument(
         "--rule-based",
@@ -265,10 +311,65 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Auto-detect: if no OPENAI_API_KEY, fall back to rules
-    if not args.rule_based and not os.environ.get("OPENAI_API_KEY"):
-        print("[!] OPENAI_API_KEY not set. Falling back to rule-based agent.")
-        print("    Set OPENAI_API_KEY to use LLM baseline.\n")
-        args.rule_based = True
+    # Build OpenAI client based on provider
+    llm_client = None
+    if not args.rule_based:
+        from openai import OpenAI
+
+        if args.provider == "hf" or (args.provider is None and not os.environ.get("OPENAI_API_KEY")):
+            # HuggingFace Inference (OpenAI-compatible)
+            api_key = args.api_key or os.environ.get("HF_TOKEN")
+            if not api_key:
+                try:
+                    from huggingface_hub import get_token
+                    api_key = get_token()
+                except Exception:
+                    pass
+            if api_key:
+                llm_client = OpenAI(
+                    base_url="https://router.huggingface.co/v1",
+                    api_key=api_key,
+                )
+                if args.provider is None:
+                    print("[*] Auto-detected HuggingFace token. Using HF Inference API.")
+            else:
+                print("[!] No HF_TOKEN or OPENAI_API_KEY found. Falling back to rule-based agent.")
+                args.rule_based = True
+
+        elif args.provider == "openai":
+            api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                print("[!] OPENAI_API_KEY not set. Falling back to rule-based agent.")
+                args.rule_based = True
+            else:
+                llm_client = OpenAI(api_key=api_key)
+
+        elif args.provider == "custom":
+            if not args.api_base:
+                print("[!] --api-base required with --provider custom")
+                sys.exit(1)
+            llm_client = OpenAI(
+                base_url=args.api_base,
+                api_key=args.api_key or "no-key",
+            )
+
+        elif args.api_base:
+            # Custom base URL without explicit provider
+            llm_client = OpenAI(
+                base_url=args.api_base,
+                api_key=args.api_key or os.environ.get("OPENAI_API_KEY", "no-key"),
+            )
+
+        else:
+            # Default: try OPENAI_API_KEY
+            api_key = args.api_key or os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                llm_client = OpenAI(api_key=api_key)
+            else:
+                print("[!] No API key found. Falling back to rule-based agent.")
+                args.rule_based = True
+
+    sys.exit(run_baseline(args.url, use_rules=args.rule_based, model=args.model,
+                          client=llm_client))
 
     sys.exit(run_baseline(args.url, use_rules=args.rule_based, model=args.model))
