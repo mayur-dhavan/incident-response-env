@@ -5,5 +5,4 @@ dist/
 build/
 .venv/
 .env
-*.lock
 .vscode/
