@@ -1,0 +1,53 @@
+name: Deploy to HF Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: true
+
+      - name: Build HF Space directory structure
+        run: |
+          mkdir -p hf_deploy/incident_response_env
+
+          # HF Space root files (wrapper for Docker deployment)
+          cp .hf/Dockerfile   hf_deploy/Dockerfile
+          cp .hf/requirements.txt hf_deploy/requirements.txt
+          cp .hf/README.md    hf_deploy/README.md
+
+          # Package contents → incident_response_env/ subfolder
+          # Exclude dev/build artefacts that are not needed at runtime
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.hf/' \
+            --exclude='.github/' \
+            --exclude='.venv/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='uv.lock' \
+            --exclude='hf_deploy/' \
+            ./ hf_deploy/incident_response_env/
+
+      - name: Push to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          cd hf_deploy
+          git init
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add .
+          git commit -m "Deploy: ${{ github.repository }}@${{ github.sha }}"
+          git push --force \
+            "https://mayur6901:${HF_TOKEN}@huggingface.co/spaces/mayur6901/incident-response-env" \
+            HEAD:main
