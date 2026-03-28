@@ -8,11 +8,17 @@ ENV PORT=${PORT}
 
 WORKDIR /app
 
-# Install dependencies first (cached layer)
-COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# ── Stage 1: install heavy base deps first (separate layer for Docker cache) ──
+# openenv-core brings in gradio/fastmcp/numpy — install alone with long timeout
+# so Docker can cache this layer and reruns only reinstall if this changes.
+RUN pip install --no-cache-dir --retries 10 --timeout 300 \
+    "openenv-core>=0.2.1"
 
-# Copy the package
+# ── Stage 2: install remaining lightweight runtime deps ──
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
+
+# ── Stage 3: copy application code ──
 COPY incident_response_env/ /app/incident_response_env/
 
 # Health check
