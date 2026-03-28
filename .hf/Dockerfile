@@ -8,17 +8,12 @@ ENV PORT=${PORT}
 
 WORKDIR /app
 
-# ── Stage 1: install heavy base deps first (separate layer for Docker cache) ──
-# openenv-core brings in gradio/fastmcp/numpy — install alone with long timeout
-# so Docker can cache this layer and reruns only reinstall if this changes.
-RUN pip install --no-cache-dir --retries 10 --timeout 300 \
-    "openenv-core>=0.2.1"
-
-# ── Stage 2: install remaining lightweight runtime deps ──
+# Install dependencies (single layer — HF Spaces has no Docker layer cache between deploys)
+# --retries and --timeout guard against transient network errors during build
 COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
+RUN pip install --no-cache-dir --retries 5 --timeout 600 -r requirements.txt
 
-# ── Stage 3: copy application code ──
+# Copy the package
 COPY incident_response_env/ /app/incident_response_env/
 
 # Health check
