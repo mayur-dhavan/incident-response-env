@@ -17,31 +17,28 @@ jobs:
 
       - name: Build HF Space directory structure
         run: |
-          mkdir -p hf_deploy/incident_response_env
+          mkdir -p hf_deploy/server
 
-          # HF Space root files (wrapper for Docker deployment)
+          # ── HF Space wrapper files (Docker deployment) ──
           cp .hf/Dockerfile        hf_deploy/Dockerfile
           cp .hf/requirements.txt  hf_deploy/requirements.txt
           cp .hf/README.md         hf_deploy/README.md
 
-          # Files that MUST be at HF Space root for validators/tools:
+          # ── Files that MUST be at HF Space root for validators ──
           cp inference.py   hf_deploy/inference.py    # hackathon: inference script check
           cp openenv.yaml   hf_deploy/openenv.yaml    # openenv validate looks here
           cp pyproject.toml hf_deploy/pyproject.toml  # openenv validate / uv run
 
-          # Package contents → incident_response_env/ subfolder
-          # Exclude dev/build artefacts that are not needed at runtime
-          rsync -a \
-            --exclude='.git/' \
-            --exclude='.hf/' \
-            --exclude='.github/' \
-            --exclude='.venv/' \
-            --exclude='__pycache__/' \
-            --exclude='*.pyc' \
-            --exclude='*.pyo' \
-            --exclude='uv.lock' \
-            --exclude='hf_deploy/' \
-            ./ hf_deploy/incident_response_env/
+          # ── Python source files (flat at root) ──
+          # The Dockerfile reconstructs the package hierarchy inside the container.
+          cp __init__.py  hf_deploy/__init__.py
+          cp models.py    hf_deploy/models.py
+          cp baseline.py  hf_deploy/baseline.py
+          cp client.py    hf_deploy/client.py
+          cp demo.py      hf_deploy/demo.py
+
+          # ── server/ subpackage ──
+          cp -r server/ hf_deploy/server/
 
       - name: Push to HF Spaces
         env:

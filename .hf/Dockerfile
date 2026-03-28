@@ -1,5 +1,7 @@
 # HF Spaces deployment wrapper — built by GitHub Actions
-# The package is installed from the incident_response_env/ subdirectory.
+# All source files live at HF Space root (flat layout).
+# The Dockerfile reconstructs the Python package hierarchy inside the container
+# so that relative imports (from ..models, from .environment) still work.
 
 FROM python:3.11-slim
 
@@ -8,13 +10,16 @@ ENV PORT=${PORT}
 
 WORKDIR /app
 
-# Install dependencies (single layer — HF Spaces has no Docker layer cache between deploys)
-# --retries and --timeout guard against transient network errors during build
+# Install dependencies using uv (10-100x faster than pip for resolution + install)
+# HF Spaces has no Docker layer cache between deploys, so speed matters.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --retries 5 --timeout 600 -r requirements.txt
+RUN uv pip install --system --no-cache-dir -r requirements.txt
 
-# Copy the package
-COPY incident_response_env/ /app/incident_response_env/
+# Reconstruct the incident_response_env package inside the container
+# from the flat files at HF Space root.
+COPY __init__.py models.py baseline.py client.py demo.py /app/incident_response_env/
+COPY server/ /app/incident_response_env/server/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
