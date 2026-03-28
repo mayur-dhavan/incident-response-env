@@ -17,15 +17,20 @@ jobs:
 
       - name: Build HF Space directory structure
         run: |
-          mkdir -p hf_deploy
+          mkdir -p hf_deploy/incident_response_env
 
-          # HF root wrapper files (Dockerfile + requirements from .hf/)
+          # HF Space root files (wrapper for Docker deployment)
           cp .hf/Dockerfile        hf_deploy/Dockerfile
           cp .hf/requirements.txt  hf_deploy/requirements.txt
           cp .hf/README.md         hf_deploy/README.md
 
-          # Copy everything else flat to root (no subfolder)
-          # Exclude dev/CI artefacts not needed at runtime
+          # Files that MUST be at HF Space root for validators/tools:
+          cp inference.py   hf_deploy/inference.py    # hackathon: inference script check
+          cp openenv.yaml   hf_deploy/openenv.yaml    # openenv validate looks here
+          cp pyproject.toml hf_deploy/pyproject.toml  # openenv validate / uv run
+
+          # Package contents → incident_response_env/ subfolder
+          # Exclude dev/build artefacts that are not needed at runtime
           rsync -a \
             --exclude='.git/' \
             --exclude='.hf/' \
@@ -36,7 +41,7 @@ jobs:
             --exclude='*.pyo' \
             --exclude='uv.lock' \
             --exclude='hf_deploy/' \
-            ./ hf_deploy/
+            ./ hf_deploy/incident_response_env/
 
       - name: Push to HF Spaces
         env:
