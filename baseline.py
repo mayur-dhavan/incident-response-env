@@ -371,5 +371,3 @@ if __name__ == "__main__":
 
     sys.exit(run_baseline(args.url, use_rules=args.rule_based, model=args.model,
                           client=llm_client))
-
-    sys.exit(run_baseline(args.url, use_rules=args.rule_based, model=args.model))
