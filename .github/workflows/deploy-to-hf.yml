@@ -24,6 +24,9 @@ jobs:
           cp .hf/requirements.txt hf_deploy/requirements.txt
           cp .hf/README.md    hf_deploy/README.md
 
+          # inference.py must live at the HF Space root (hackathon validator check)
+          cp inference.py hf_deploy/inference.py
+
           # Package contents → incident_response_env/ subfolder
           # Exclude dev/build artefacts that are not needed at runtime
           rsync -a \
