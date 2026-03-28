@@ -1,5 +1,5 @@
 # HF Spaces deployment wrapper — built by GitHub Actions
-# The package is installed from the incident_response_env/ subdirectory.
+# Flat layout: all package files copied directly to /app root.
 
 FROM python:3.11-slim
 
@@ -13,8 +13,8 @@ WORKDIR /app
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --retries 5 --timeout 600 -r requirements.txt
 
-# Copy the package
-COPY incident_response_env/ /app/incident_response_env/
+# Copy all app files flat into /app (no subfolder)
+COPY . /app/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
@@ -22,4 +22,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 
 EXPOSE ${PORT}
 
-CMD ["sh", "-c", "python -m uvicorn incident_response_env.server.app:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "python -m uvicorn server.app:app --host 0.0.0.0 --port ${PORT}"]

@@ -25,7 +25,10 @@ from fastapi.responses import HTMLResponse
 from openenv.core.env_server.http_server import create_app
 from pydantic import BaseModel
 
-from ..models import IncidentAction, IncidentObservation, IncidentState
+try:
+    from models import IncidentAction, IncidentObservation, IncidentState  # flat layout (HF Space / Docker)
+except ImportError:
+    from ..models import IncidentAction, IncidentObservation, IncidentState  # package layout (local dev)
 from .environment import IncidentEnvironment
 from .graders import grade
 from .scenarios import ALL_TASKS
