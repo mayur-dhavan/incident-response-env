@@ -11,10 +11,7 @@ from typing import Any
 
 from openenv.core.env_server import Environment
 
-try:
-    from models import IncidentAction, IncidentObservation, IncidentState  # flat layout (HF Space / Docker)
-except ImportError:
-    from ..models import IncidentAction, IncidentObservation, IncidentState  # package layout (local dev)
+from ..models import IncidentAction, IncidentObservation, IncidentState
 from .scenarios import TASK_MAP, ALL_TASKS, TASK1
 
 
