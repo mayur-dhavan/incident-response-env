@@ -28,6 +28,7 @@ jobs:
           cp inference.py   hf_deploy/inference.py    # hackathon: inference script check
           cp openenv.yaml   hf_deploy/openenv.yaml    # openenv validate looks here
           cp pyproject.toml hf_deploy/pyproject.toml  # openenv validate / uv run
+          cp uv.lock       hf_deploy/uv.lock         # openenv validate requires it
 
           # ── Python source files (flat at root) ──
           # The Dockerfile reconstructs the package hierarchy inside the container.
