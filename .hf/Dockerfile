@@ -7,6 +7,7 @@ FROM python:3.11-slim
 
 ARG PORT=7860
 ENV PORT=${PORT}
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -28,7 +29,8 @@ RUN printf 'from .models import IncidentAction, IncidentObservation, IncidentSta
     > /app/incident_response_env/__init__.py
 
 # Fail-fast: verify the import works at build time (gives a real traceback)
-RUN python -c "from incident_response_env.server.app import app; print('Import OK')"
+RUN ls -R /app/incident_response_env/ && \
+    python -c "import sys; print('sys.path:', sys.path); from incident_response_env.server.app import app; print('Import OK')"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
