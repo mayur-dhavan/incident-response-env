@@ -17,7 +17,7 @@ jobs:
 
       - name: Build HF Space directory structure
         run: |
-          mkdir -p hf_deploy/server
+          mkdir -p hf_deploy
 
           # ── HF Space wrapper files (Docker deployment) ──
           cp .hf/Dockerfile        hf_deploy/Dockerfile
