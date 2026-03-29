@@ -21,6 +21,15 @@ RUN uv pip install --system --no-cache-dir -r requirements.txt
 COPY __init__.py models.py baseline.py client.py demo.py /app/incident_response_env/
 COPY server/ /app/incident_response_env/server/
 
+# The source __init__.py eagerly imports IncidentEnv (the HTTP *client*),
+# which pulls in openenv.core.EnvClient → gradio chain.  The server only
+# needs the models, so override with a minimal init.
+RUN printf 'from .models import IncidentAction, IncidentObservation, IncidentState\n__all__ = ["IncidentAction", "IncidentObservation", "IncidentState"]\n' \
+    > /app/incident_response_env/__init__.py
+
+# Fail-fast: verify the import works at build time (gives a real traceback)
+RUN python -c "from incident_response_env.server.app import app; print('Import OK')"
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/health')" || exit 1
