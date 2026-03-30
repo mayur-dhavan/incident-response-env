@@ -1,36 +1,23 @@
 # HF Spaces deployment wrapper — built by GitHub Actions
-# All source files live at HF Space root (flat layout).
-# The Dockerfile reconstructs the Python package hierarchy inside the container
-# so that relative imports (from ..models, from .environment) still work.
+# Flat repo layout: all source files at root, Dockerfile recreates package structure.
 
 FROM python:3.11-slim
 
 ARG PORT=7860
 ENV PORT=${PORT}
-ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# Install dependencies using uv (10-100x faster than pip for resolution + install)
-# HF Spaces has no Docker layer cache between deploys, so speed matters.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install dependencies first (cached layer)
 COPY requirements.txt ./requirements.txt
-RUN uv pip install --system --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Reconstruct the incident_response_env package inside the container
-# from the flat files at HF Space root.
-COPY __init__.py models.py baseline.py client.py demo.py /app/incident_response_env/
+# Recreate package structure from flat layout
+COPY __init__.py models.py client.py baseline.py demo.py /app/incident_response_env/
 COPY server/ /app/incident_response_env/server/
 
-# The source __init__.py eagerly imports IncidentEnv (the HTTP *client*),
-# which pulls in openenv.core.EnvClient → gradio chain.  The server only
-# needs the models, so override with a minimal init.
-RUN printf 'from .models import IncidentAction, IncidentObservation, IncidentState\n__all__ = ["IncidentAction", "IncidentObservation", "IncidentState"]\n' \
-    > /app/incident_response_env/__init__.py
-
-# Fail-fast: verify the import works at build time (gives a real traceback)
-RUN ls -R /app/incident_response_env/ && \
-    python -c "import sys; print('sys.path:', sys.path); from incident_response_env.server.app import app; print('Import OK')"
+# Hackathon validation files stay at /app root
+COPY inference.py openenv.yaml pyproject.toml /app/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

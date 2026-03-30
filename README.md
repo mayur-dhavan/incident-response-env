@@ -1,3 +1,13 @@
+---
+title: Incident Response Environment
+emoji: 🚨
+colorFrom: red
+colorTo: yellow
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Incident Response Environment
 
 An [OpenEnv](https://github.com/meta-llama/open-env)-compliant environment that simulates **production incident response** — the real-world task of diagnosing and resolving server outages that SREs (Site Reliability Engineers) perform daily.
