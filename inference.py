@@ -79,6 +79,29 @@ def _wait_for_server(base_url: str, retries: int = 10, delay: int = 15) -> bool:
     return False
 
 
+# ── Structured stdout logging (required by hackathon spec) ──────────────────
+
+def log_start(task: str, model: str) -> None:
+    print(f"[START] task={task} env=incident-response-env model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
 # ── System prompt for the LLM agent ─────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
@@ -142,7 +165,10 @@ def run_episode(
     Run the LLM agent on a single task episode.
 
     Returns: (score, steps, system_restored)
+    Emits [START], [STEP]*, [END] to stdout per hackathon spec.
     """
+    log_start(task=task_id, model=model)
+
     # Reset environment for this task
     reset_resp = _post(f"{base_url}/reset", {"task_id": task_id})
     obs_text = reset_resp.get("observation", {}).get("output", str(reset_resp))
@@ -159,81 +185,94 @@ def run_episode(
     ]
 
     history: list[str] = []
+    step_rewards: list[float] = []
     steps = 0
     done = False
     retries = 0
+    score = 0.0
+    restored = False
 
-    while not done and steps < MAX_STEPS:
-        # Ask the LLM for an action
-        try:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-                stream=False,
-            )
-            reply = completion.choices[0].message.content or ""
-            retries = 0
-        except Exception as exc:
-            retries += 1
-            print(f"    [!] LLM API error (attempt {retries}): {exc}")
-            if retries >= 3:
-                print("    [!] Too many API errors. Using fallback action.")
-                reply = FALLBACK_ACTION
+    try:
+        while not done and steps < MAX_STEPS:
+            # Ask the LLM for an action
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                    stream=False,
+                )
+                reply = completion.choices[0].message.content or ""
                 retries = 0
-            else:
-                time.sleep(2 ** retries)
+            except Exception as exc:
+                retries += 1
+                print(f"    [!] LLM API error (attempt {retries}): {exc}")
+                if retries >= 3:
+                    print("    [!] Too many API errors. Using fallback action.")
+                    reply = FALLBACK_ACTION
+                    retries = 0
+                else:
+                    time.sleep(2 ** retries)
+                    continue
+
+            # Parse action from LLM response
+            action = parse_action_json(reply)
+            if action is None:
+                # Nudge the LLM if it returned invalid JSON
+                messages.append({"role": "assistant", "content": reply})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Invalid JSON. Return ONLY a JSON object with "
+                        "action_type, target, and parameters."
+                    ),
+                })
                 continue
 
-        # Parse action from LLM response
-        action = parse_action_json(reply)
-        if action is None:
-            # Nudge the LLM if it returned invalid JSON
+            # Execute the action
+            step_resp = _post(f"{base_url}/step", {"action": action})
+            steps += 1
+            done = step_resp.get("done", False)
+            reward = step_resp.get("reward", 0.0)
+            obs_output = step_resp.get("observation", {}).get("output", "")
+            obs_success = step_resp.get("observation", {}).get("success", True)
+            error_msg: str | None = step_resp.get("observation", {}).get("error") or None
+            if not obs_success and not error_msg:
+                error_msg = "action_failed"
+
+            action_str = json.dumps(action, separators=(",", ":"))
+            step_rewards.append(reward)
+            log_step(step=steps, action=action_str, reward=reward, done=done, error=error_msg)
+
+            error_flag = " ERROR" if not obs_success else ""
+            history_line = f"Step {steps}: {action_str} -> reward {reward:+.2f}{error_flag}"
+            history.append(history_line)
+            print(
+                f"    Step {steps}: {action['action_type']}({action['target']}) "
+                f"-> reward={reward:+.2f} done={done}{error_flag}"
+            )
+
+            # Feed observation back to LLM
             messages.append({"role": "assistant", "content": reply})
-            messages.append({
-                "role": "user",
-                "content": (
-                    "Invalid JSON. Return ONLY a JSON object with "
-                    "action_type, target, and parameters."
-                ),
-            })
-            continue
+            feedback = f"OBSERVATION (step {steps}, reward={reward}):\n\n{obs_output}"
+            if done:
+                feedback += "\n\nEpisode ended."
+            else:
+                feedback += "\n\nWhat is your next action? Return ONLY valid JSON."
+            messages.append({"role": "user", "content": feedback})
 
-        # Execute the action
-        step_resp = _post(f"{base_url}/step", {"action": action})
-        steps += 1
-        done = step_resp.get("done", False)
-        reward = step_resp.get("reward", 0.0)
-        obs_output = step_resp.get("observation", {}).get("output", "")
+    finally:
+        # Always emit [END] — even on exception — per hackathon spec
+        try:
+            state = _get(f"{base_url}/state")
+            grader = _post(f"{base_url}/grader")
+            score = grader.get("score", 0.0)
+            restored = state.get("system_restored", False)
+        except Exception:
+            pass
+        log_end(success=score > 0.0, steps=steps, score=score, rewards=step_rewards)
 
-        action_str = json.dumps(action, separators=(",", ":"))
-        error_flag = ""
-        if not step_resp.get("observation", {}).get("success", True):
-            error_flag = " ERROR"
-        history_line = (
-            f"Step {steps}: {action_str} -> reward {reward:+.2f}{error_flag}"
-        )
-        history.append(history_line)
-        print(
-            f"    Step {steps}: {action['action_type']}({action['target']}) "
-            f"-> reward={reward:+.2f} done={done}{error_flag}"
-        )
-
-        # Feed observation back to LLM
-        messages.append({"role": "assistant", "content": reply})
-        feedback = f"OBSERVATION (step {steps}, reward={reward}):\n\n{obs_output}"
-        if done:
-            feedback += "\n\nEpisode ended."
-        else:
-            feedback += "\n\nWhat is your next action? Return ONLY valid JSON."
-        messages.append({"role": "user", "content": feedback})
-
-    # Get final score from grader
-    state = _get(f"{base_url}/state")
-    grader = _post(f"{base_url}/grader")
-    score = grader.get("score", 0.0)
-    restored = state.get("system_restored", False)
     return score, steps, restored
 
 
