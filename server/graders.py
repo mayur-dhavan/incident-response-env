@@ -179,8 +179,13 @@ GRADER_MAP = {
 
 
 def grade(state: "IncidentState") -> float:
-    """Grade the current episode and return score in [0.0, 1.0]."""
+    """Grade the current episode and return score in (0.0, 1.0) exclusive.
+
+    The hackathon evaluator requires scores strictly between 0 and 1 —
+    not 0.0 and not 1.0.  We clamp to [0.01, 0.99] after grading.
+    """
     grader_fn = GRADER_MAP.get(state.task_id)
     if grader_fn is None:
         raise ValueError(f"Unknown task_id: {state.task_id!r}")
-    return grader_fn(state)
+    raw = grader_fn(state)
+    return round(max(0.01, min(raw, 0.99)), 4)
