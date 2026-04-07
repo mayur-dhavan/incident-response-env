@@ -74,6 +74,7 @@ class IncidentEnvironment(Environment):
             current_score=0.0,
         )
 
+        max_steps: int = scenario.get("max_steps", 15)
         return IncidentObservation(
             output=(
                 f"Incident Response Environment — Task: {scenario['title']}\n\n"
@@ -81,11 +82,14 @@ class IncidentEnvironment(Environment):
                 f"{scenario['description']}\n\n"
                 f"Available actions: read_logs, check_metrics, restart_service, "
                 f"rollback, exec_command, check_network\n\n"
-                f"System snapshot:\n{self._format_services()}"
+                f"System snapshot:\n{self._format_services()}\n\n"
+                f"[Step budget: {max_steps} steps]"
             ),
             services=copy.deepcopy(self._services),
             done=False,
             success=True,
+            steps_remaining=max_steps,
+            partial_score=0.0,
         )  # type: ignore[call-arg]
 
     def step(
@@ -143,6 +147,15 @@ class IncidentEnvironment(Environment):
         self._state.current_score = grade(self._state)
         # Reward = delta in score: positive for progress, negative for mistakes
         obs.reward = round(self._state.current_score - prev_score, 4)
+
+        # Populate budget and progress fields for RL agents
+        remaining = max(0, max_steps - self._state.step_count)
+        obs.steps_remaining = remaining
+        obs.partial_score = self._state.current_score
+
+        # Append budget line to output so LLM agents also see it
+        if not obs.done:
+            obs.output += f"\n\n[Step {self._state.step_count}/{max_steps} | {remaining} steps remaining | partial score: {obs.partial_score:.2f}]"
 
         obs.services = copy.deepcopy(self._services)
         return obs

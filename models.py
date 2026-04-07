@@ -28,17 +28,22 @@ class IncidentObservation(Observation):
     """
     What the agent sees after each action.
 
-    output:   human-readable result of the action (log snippet, metric table, etc.)
-    services: current snapshot of every service's health
-    done:     True when episode is over (fix verified or max_steps reached)
-    success:  False only if the action itself was invalid/errored
-    error:    populated when success=False
+    output:          Human-readable result of the action (log snippet, metric table, etc.)
+    services:        Current health snapshot of all services (status, cpu, memory, connections, error_count)
+    success:         False only if the action itself was invalid/errored
+    error:           Populated when success=False
+    steps_remaining: Steps left in the episode budget (None before first step)
+    partial_score:   Running grader score after this step — lets the agent see if it's making progress
+    done:            True when episode is over (fix verified or max_steps reached)
+    reward:          Per-step reward = delta in grader score (positive = progress, negative = mistake)
     """
 
     output: str = ""
     services: Dict[str, Any] = Field(default_factory=dict)
     success: bool = True
     error: str = ""
+    steps_remaining: Optional[int] = None
+    partial_score: float = 0.0
     # Note: 'done' and 'reward' are already defined in the parent Observation class
 
 

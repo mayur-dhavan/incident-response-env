@@ -187,6 +187,35 @@ class BaselineResponse(BaseModel):
 # GET /tasks
 # ──────────────────────────────────────────────
 
+_TASK_RUBRICS: dict[str, dict[str, Any]] = {
+    "task_1_oom": {
+        "rubric": {"investigation_any_logs": 0.20, "investigation_api_server_logs": 0.20, "fix_restart_api_server": 0.30, "system_restored": 0.30},
+        "penalties": [],
+        "optimal_steps": 2,
+    },
+    "task_2_leak": {
+        "rubric": {"investigation_any": 0.15, "investigation_worker": 0.20, "diagnosis_worker_metrics": 0.15, "fix_rollback_worker": 0.20, "system_restored": 0.30},
+        "penalties": [{"trigger": "restart_service api-server", "amount": -0.15}, {"trigger": "restart_service worker", "amount": -0.10}],
+        "optimal_steps": 3,
+    },
+    "task_3_cascade": {
+        "rubric": {"investigation_any": 0.10, "investigation_postgres": 0.20, "root_cause_identified": 0.20, "fix_applied": 0.20, "system_restored": 0.30},
+        "penalties": [{"trigger": "blind restart before diagnosis", "amount": -0.10, "max": -0.20}, {"trigger": "df/du disk check (red herring)", "amount": -0.05, "max": -0.10}],
+        "optimal_steps": 4,
+    },
+    "task_4_cache": {
+        "rubric": {"investigation_any": 0.10, "investigation_redis": 0.20, "diagnosis_redis_metrics": 0.15, "fix_flush_cache": 0.25, "system_restored": 0.30},
+        "penalties": [{"trigger": "restart_service api-server", "amount": -0.10}, {"trigger": "restart_service redis", "amount": -0.10}],
+        "optimal_steps": 3,
+    },
+    "task_5_cert": {
+        "rubric": {"investigation_any": 0.10, "investigation_nginx": 0.15, "diagnosis_cert_check": 0.20, "fix_renew_cert": 0.25, "system_restored": 0.30},
+        "penalties": [{"trigger": "blind restart before diagnosis", "amount": -0.10, "max": -0.20}, {"trigger": "iptables/fail2ban (DDoS red herring)", "amount": -0.10}],
+        "optimal_steps": 4,
+    },
+}
+
+
 @app.get("/tasks")
 def get_tasks() -> dict[str, Any]:
     """
@@ -195,11 +224,12 @@ def get_tasks() -> dict[str, Any]:
     """
     tasks = [
         {
-            "task_id":    t["task_id"],
-            "title":      t["title"],
-            "difficulty": t["difficulty"],
+            "task_id":     t["task_id"],
+            "title":       t["title"],
+            "difficulty":  t["difficulty"],
             "description": t["description"],
-            "max_steps":  t["max_steps"],
+            "max_steps":   t["max_steps"],
+            "grader_rubric": _TASK_RUBRICS.get(t["task_id"], {}),
         }
         for t in ALL_TASKS
     ]
