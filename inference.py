@@ -148,9 +148,15 @@ def parse_action_json(raw_text: str) -> dict | None:
         action = json.loads(raw)
         if "action_type" not in action:
             return None
-        action.setdefault("target", "")
-        action.setdefault("parameters", {})
-        return action
+        # IMPORTANT: The Action base class uses extra="forbid", so any field
+        # the LLM adds beyond action_type/target/parameters (e.g. "reasoning",
+        # "thought", "explanation") would cause a 422 from /step.  Filter here.
+        params = action.get("parameters", {})
+        return {
+            "action_type": str(action.get("action_type", "")),
+            "target": str(action.get("target", "")),
+            "parameters": params if isinstance(params, dict) else {},
+        }
     except (json.JSONDecodeError, ValueError):
         return None
 
@@ -231,7 +237,13 @@ def run_episode(
                 continue
 
             # Execute the action
-            step_resp = _post(f"{base_url}/step", {"action": action})
+            try:
+                step_resp = _post(f"{base_url}/step", {"action": action})
+            except Exception as step_exc:
+                print(f"    [!] /step error: {step_exc}")
+                log_step(step=steps + 1, action=json.dumps(action, separators=(',', ':')), reward=0.0, done=True, error=str(step_exc))
+                done = True
+                break
             steps += 1
             done = step_resp.get("done", False)
             reward = step_resp.get("reward", 0.0)
@@ -342,12 +354,16 @@ def main() -> int:
         task_id = t["task_id"]
         print(f"  Running {task_id} ({t['difficulty']})...")
 
-        score, steps, restored = run_episode(
-            task_id=task_id,
-            client=client,
-            model=MODEL_NAME,
-            base_url=ENV_BASE_URL,
-        )
+        try:
+            score, steps, restored = run_episode(
+                task_id=task_id,
+                client=client,
+                model=MODEL_NAME,
+                base_url=ENV_BASE_URL,
+            )
+        except Exception as ep_exc:
+            print(f"    [!] Episode {task_id} failed with unhandled exception: {ep_exc}")
+            score, steps, restored = 0.01, 0, False
 
         results.append({
             "task_id": task_id,
