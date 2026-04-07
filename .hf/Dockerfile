@@ -1,7 +1,7 @@
 # HF Spaces deployment wrapper — built by GitHub Actions
 # Flat repo layout: all source files at root, Dockerfile recreates package structure.
 
-FROM python:3.11-slim
+FROM public.ecr.aws/docker/library/python:3.11-slim
 
 ARG PORT=7860
 ENV PORT=${PORT}
