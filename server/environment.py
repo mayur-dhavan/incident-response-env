@@ -251,6 +251,38 @@ class IncidentEnvironment(Environment):
             # Service stays down
             self._services[svc]["status"] = "down"
 
+        elif task_id == "task_4_cache" and svc in ("api-server", "redis"):
+            # Restarting doesn't help — poisoned cache keys persist
+            if svc == "api-server":
+                output_lines.append(f"✓ {svc} restarted — PID 16044")
+                output_lines.append("  ... api-server reading cache → same corrupt keys → 500s continue")
+                output_lines.append("  Cache poisoning persists. Restart does not clear Redis data.")
+                self._services["api-server"]["error_count"] = 4218  # errors continue
+            elif svc == "redis":
+                output_lines.append(f"✓ {svc} restarted — PID 16100")
+                output_lines.append("  ... redis loaded RDB snapshot from disk → poisoned keys restored")
+                output_lines.append("  Cache data persisted through restart. Use FLUSHALL to clear.")
+
+        elif task_id == "task_5_cert" and svc == "nginx":
+            # Restarting nginx without renewing cert doesn't help
+            output_lines.append(f"✓ {svc} restarted — PID 17050")
+            if self._state.fix_applied:
+                # Cert was renewed, now nginx picks up new cert
+                self._services["nginx"]["status"] = "healthy"
+                self._services["nginx"]["error_count"] = 0
+                self._services["nginx"]["cpu"] = 3.0
+                self._services["nginx"]["connections"] = 42
+                self._state.system_restored = True
+                output_lines.append("✓ nginx loaded new TLS certificate")
+                output_lines.append("✓ SSL handshakes succeeding — upstream connections restored")
+            else:
+                output_lines.append("  ... nginx still cannot establish SSL to api-server:8443")
+                output_lines.append("  SSL certificate still expired. Renew certificate first.")
+
+        elif task_id == "task_5_cert" and svc == "api-server":
+            output_lines.append(f"✓ {svc} restarted — PID 17080")
+            output_lines.append("  api-server was already healthy. Problem is in the TLS certificate, not the server.")
+
         else:
             # Generic restart — service comes up healthy
             self._services[svc]["status"] = "healthy"
@@ -361,6 +393,77 @@ class IncidentEnvironment(Environment):
             else:
                 output_lines.append(f"Command executed: {cmd}")
 
+        # Task 4: Redis cache poisoning
+        elif task_id == "task_4_cache":
+            if "flushall" in cmd.lower() or "flushdb" in cmd.lower():
+                self._state.fix_applied = True
+                self._services["api-server"]["status"] = "healthy"
+                self._services["api-server"]["cpu"] = 14.0
+                self._services["api-server"]["error_count"] = 0
+                self._services["nginx"]["status"] = "healthy"
+                self._services["nginx"]["error_count"] = 0
+                self._metrics["redis"]["used_memory_mb"] = 12
+                self._metrics["redis"]["keyspace_keys"] = 0
+                self._metrics["redis"]["corrupted_keys_estimate"] = "0"
+                self._metrics["api-server"]["error_rate"] = 0.0
+                self._metrics["api-server"]["cache_error_rate"] = 0.0
+                self._state.system_restored = True
+                output_lines.append("OK")
+                output_lines.append("✓ All Redis keys flushed — 184210 keys removed")
+                output_lines.append("✓ Cache rebuilding from database (clean entries)")
+                output_lines.append("✓ API error rate dropping to 0%")
+            elif "keys" in cmd.lower() or "scan" in cmd.lower():
+                output_lines.extend([
+                    "user:profile:8812 → (binary/corrupt msgpack v1 data)",
+                    "product:detail:441 → (binary/corrupt msgpack v1 data)",
+                    "user:profile:1204 → (binary/corrupt msgpack v1 data)",
+                    "... 184207 more keys",
+                    "(Most keys contain v1 msgpack format; api-server v3.1.0 expects v2)",
+                ])
+            else:
+                output_lines.append(f"Command executed: {cmd}")
+
+        # Task 5: TLS certificate expiry
+        elif task_id == "task_5_cert":
+            if "certbot" in cmd.lower() and "renew" in cmd.lower():
+                self._state.fix_applied = True
+                self._metrics["api-server"]["tls_cert_expiry"] = "VALID (renewed)"
+                self._metrics["api-server"]["tls_cert_not_after"] = "2026-06-24T13:30:00Z"
+                output_lines.extend([
+                    "Saving debug log to /var/log/letsencrypt/letsencrypt.log",
+                    "Renewing an existing certificate for api-server.internal",
+                    "",
+                    "Successfully received certificate.",
+                    "Certificate is saved at: /etc/letsencrypt/live/api-server.internal/fullchain.pem",
+                    "Key is saved at:         /etc/letsencrypt/live/api-server.internal/privkey.pem",
+                    "",
+                    "✓ Certificate renewed — valid until 2026-06-24T13:30:00Z",
+                    "Note: Restart nginx to load the new certificate.",
+                ])
+            elif "openssl" in cmd.lower() or "ssl" in cmd.lower():
+                output_lines.extend([
+                    "Connecting to api-server:8443...",
+                    "subject=CN = api-server.internal",
+                    "issuer=CN = Let's Encrypt Authority X3",
+                    "notBefore=Mar 26 13:30:00 2025 GMT",
+                    "notAfter=Mar 26 13:30:00 2026 GMT",
+                    "",
+                    "verify error:num=10:certificate has expired",
+                    "Verify return code: 10 (certificate has expired)",
+                    "",
+                    "★ Certificate expired 45 minutes ago.",
+                ])
+            elif any(d in cmd.lower() for d in ["iptables", "fail2ban", "ufw"]):
+                output_lines.extend([
+                    "Chain INPUT (policy ACCEPT 0 packets, 0 bytes)",
+                    "Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)",
+                    "Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)",
+                    "",
+                    "(No firewall rules configured. No evidence of DDoS — high connections caused by TLS retry storm.)",
+                ])
+            else:
+                output_lines.append(f"Command executed: {cmd}")
+
         else:
             output_lines.append(f"Command executed: {cmd}")
             output_lines.append("(No specific simulation for this command in current task)")
@@ -383,6 +486,20 @@ class IncidentEnvironment(Environment):
             )
             # Hints at postgres — counts toward root cause discovery
             self._state.root_cause_identified = True
+        elif task_id == "task_5_cert" and ("api-server" in target or "nginx" in target):
+            output = (
+                f"Network check: {target}\n"
+                f"  TCP connection: ESTABLISHED (port 8443 reachable)\n"
+                f"  SSL handshake: FAILED — certificate verify failed\n"
+                f"  → Network is fine; TLS certificate on api-server has expired."
+            )
+        elif task_id == "task_4_cache" and "redis" in target:
+            output = (
+                f"Network check: {target}\n"
+                f"  TCP connection: ESTABLISHED (port 6379 reachable)\n"
+                f"  PING → PONG (redis responsive)\n"
+                f"  → Network is fine; redis is reachable but serving corrupt cache data."
+            )
         else:
             svc = action.target.split("->")[-1] if "->" in action.target else action.target
             status = self._services.get(svc, {}).get("status", "unknown")

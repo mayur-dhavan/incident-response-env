@@ -248,7 +248,168 @@ TASK3: dict[str, Any] = {
     },
 }
 
+
+# ─────────────────────────────────────────────
+# TASK 4 — Medium: Redis Cache Poisoning
+# ─────────────────────────────────────────────
+# A bad deployment wrote corrupted serialization to Redis.
+# api-server reads stale/poisoned cache → 500 errors on every cache hit.
+# Cache misses fall through to postgres (which is healthy).
+# Naïve fix: restart api-server (doesn't help, cache still poisoned).
+# Correct fix: exec_command("redis-cli FLUSHALL") to clear poisoned keys.
+# Red herring: high CPU on api-server (it's busy re-serializing bad data).
+# ─────────────────────────────────────────────
+
+TASK4: dict[str, Any] = {
+    "task_id": "task_4_cache",
+    "title": "Cache Poisoning — Intermittent 500 Errors",
+    "difficulty": "medium",
+    "description": (
+        "Users are reporting intermittent 500 Internal Server Errors on "
+        "roughly 60% of requests. The errors started ~2 hours ago after "
+        "a routine deployment. Investigate and restore service."
+    ),
+    "max_steps": 15,
+    "services": {
+        "api-server":  {"status": "degraded", "cpu": 78.0, "memory": 52.0, "connections": 24, "error_count": 4218},
+        "postgres":    {"status": "healthy",  "cpu":  6.0, "memory": 42.0, "connections":  9, "error_count": 0},
+        "redis":       {"status": "healthy",  "cpu":  3.0, "memory": 48.0, "connections":  8, "error_count": 0},
+        "worker":      {"status": "healthy",  "cpu":  7.0, "memory": 29.0, "connections":  5, "error_count": 0},
+        "nginx":       {"status": "degraded", "cpu":  4.0, "memory":  8.0, "connections": 42, "error_count": 2531},
+    },
+    "logs": {
+        "api-server": [
+            "2026-03-26T10:00:01Z INFO  [api-server] Deployment v3.1.0 started",
+            "2026-03-26T10:00:04Z INFO  [api-server] v3.1.0 healthy, replacing v3.0.9",
+            "2026-03-26T10:14:22Z ERROR [api-server] Failed to deserialize cache entry for key user:profile:8812 — InvalidJSON",
+            "2026-03-26T10:14:22Z ERROR [api-server] HTTP 500 on GET /api/v1/users/8812 — cache deserialization error",
+            "2026-03-26T10:28:51Z ERROR [api-server] Failed to deserialize cache entry for key product:detail:441 — InvalidJSON",
+            "2026-03-26T10:28:51Z WARN  [api-server] Cache error rate 62% — most cache hits returning corrupt data",
+            "2026-03-26T11:43:17Z ERROR [api-server] Serialization format mismatch: expected msgpack v2, got msgpack v1 in cache",
+            "2026-03-26T12:01:05Z ERROR [api-server] 4218 cache-related 500s in last 2 hours",
+        ],
+        "redis": [
+            "2026-03-26T10:00:00Z INFO  [redis] 8 clients connected, used_memory: 412MB",
+            "2026-03-26T10:00:01Z INFO  [redis] keyspace: db0 keys=184210, expires=91200",
+            "2026-03-26T10:14:00Z INFO  [redis] hit_rate: 0.62, miss_rate: 0.38",
+            "2026-03-26T12:01:00Z INFO  [redis] used_memory: 418MB, peak: 420MB",
+            "2026-03-26T12:01:00Z INFO  [redis] evicted_keys: 0, expired_keys: 412",
+        ],
+        "nginx": [
+            "2026-03-26T10:14:30Z ERROR [nginx] upstream returned 500 for GET /api/v1/users/8812",
+            "2026-03-26T10:14:31Z ERROR [nginx] upstream returned 500 for GET /api/v1/products/441",
+            "2026-03-26T12:01:00Z WARN  [nginx] 5xx error rate at 62% over last 2 hours",
+        ],
+        "postgres": ["2026-03-26T12:00:00Z INFO  [postgres] checkpoint complete: wrote 24 buffers"],
+        "worker":   ["2026-03-26T12:00:00Z INFO  [worker] processed 118 jobs in last 60s"],
+    },
+    "metrics": {
+        "api-server": {"request_rate": 420, "p95_latency_ms": 1240, "error_rate": 0.62, "cache_error_rate": 0.62},
+        "postgres":   {"query_rate": 168, "p95_latency_ms": 8.1, "error_rate": 0.0},
+        "redis":      {"ops_per_sec": 4200, "hit_rate": 0.62, "used_memory_mb": 418, "keyspace_keys": 184210,
+                       "corrupted_keys_estimate": "~114k (62% of keyspace)", "evicted_keys": 0},
+        "worker":     {"jobs_per_min": 118, "queue_depth": 12},
+        "nginx":      {"requests_per_sec": 420, "5xx_rate": 0.62},
+    },
+    "grader": {
+        "root_cause_actions": [
+            {"action_type": "read_logs",     "target": "redis"},
+            {"action_type": "check_metrics", "target": "redis"},
+            {"action_type": "read_logs",     "target": "api-server"},
+        ],
+        "fix_actions": [
+            {"action_type": "exec_command", "target": "FLUSHALL"},
+            {"action_type": "exec_command", "target": "flushdb"},
+        ],
+        "wrong_fix_actions": [
+            {"action_type": "restart_service", "target": "api-server"},
+            {"action_type": "restart_service", "target": "redis"},
+        ],
+        "restored_service": "redis",
+    },
+}
+
+
+# ─────────────────────────────────────────────
+# TASK 5 — Hard: TLS Certificate Expiry
+# ─────────────────────────────────────────────
+# The internal TLS certificate for the api-server expired 45 minutes ago.
+# nginx (reverse proxy) can't establish TLS to backend → 502 Bad Gateway.
+# Misleading: high connection count on nginx looks like a DDoS attack.
+# api-server itself logs show it started fine (it listens, but TLS fails).
+# Fix: exec_command("certbot renew --force-renewal") + restart_service nginx.
+# ─────────────────────────────────────────────
+
+TASK5: dict[str, Any] = {
+    "task_id": "task_5_cert",
+    "title": "TLS Certificate Expiry — 502 Bad Gateway",
+    "difficulty": "hard",
+    "description": (
+        "Users are getting 502 Bad Gateway errors since ~45 minutes ago. "
+        "The application was working fine yesterday. "
+        "Multiple services show unusual behavior. Investigate the root cause."
+    ),
+    "max_steps": 20,
+    "services": {
+        "api-server":  {"status": "healthy",  "cpu": 4.0,  "memory": 32.0, "connections":  0, "error_count": 0},
+        "postgres":    {"status": "healthy",  "cpu": 5.0,  "memory": 41.0, "connections":  8, "error_count": 0},
+        "redis":       {"status": "healthy",  "cpu": 1.0,  "memory": 12.0, "connections":  3, "error_count": 0},
+        "worker":      {"status": "healthy",  "cpu": 8.0,  "memory": 28.0, "connections":  5, "error_count": 0},
+        "nginx":       {"status": "degraded", "cpu": 45.0, "memory": 18.0, "connections": 847, "error_count": 12841},
+    },
+    "logs": {
+        "nginx": [
+            "2026-03-26T14:15:00Z INFO  [nginx] reload: PID 4128",
+            "2026-03-26T14:15:01Z ERROR [nginx] SSL_do_handshake() failed (SSL: error:0A000086:SSL routines::certificate verify failed)",
+            "2026-03-26T14:15:01Z ERROR [nginx] upstream SSL certificate has expired while SSL handshaking to api-server:8443",
+            "2026-03-26T14:15:02Z ERROR [nginx] 502 Bad Gateway — peer closed connection in SSL handshake",
+            "2026-03-26T14:15:03Z WARN  [nginx] upstream connection retries exhausted for api-server:8443",
+            "2026-03-26T14:30:00Z ERROR [nginx] 12841 failed SSL handshakes in last 15 minutes",
+            # Misleading: high connections look like DDoS
+            "2026-03-26T14:30:01Z WARN  [nginx] active connections: 847 (threshold: 500)",
+            "2026-03-26T14:30:02Z WARN  [nginx] connection surge detected — possible SYN flood or client retry storm",
+        ],
+        "api-server": [
+            "2026-03-26T14:10:00Z INFO  [api-server] Listening on 0.0.0.0:8443 (TLS)",
+            "2026-03-26T14:10:01Z INFO  [api-server] Health check: OK (internal)",
+            "2026-03-26T14:15:02Z WARN  [api-server] No incoming connections for 5 minutes — verify upstream proxy",
+            "2026-03-26T14:30:00Z WARN  [api-server] No incoming connections for 20 minutes — upstream may be down",
+        ],
+        "postgres": ["2026-03-26T14:15:00Z INFO  [postgres] checkpoint complete: wrote 18 buffers"],
+        "redis":    ["2026-03-26T14:15:00Z INFO  [redis] 3 clients connected, no issues"],
+        "worker":   ["2026-03-26T14:15:00Z INFO  [worker] processed 120 jobs in last 60s"],
+    },
+    "metrics": {
+        "api-server": {"request_rate": 0, "p95_latency_ms": None, "error_rate": 0.0, "tls_cert_expiry": "EXPIRED (45m ago)",
+                       "tls_cert_not_after": "2026-03-26T13:30:00Z"},
+        "postgres":   {"query_rate": 42,  "p95_latency_ms": 4.2, "error_rate": 0.0},
+        "redis":      {"ops_per_sec": 310, "hit_rate": 0.97},
+        "worker":     {"jobs_per_min": 120, "queue_depth": 88},
+        "nginx":      {"requests_per_sec": 840, "5xx_rate": 0.98, "ssl_handshake_failures": 12841,
+                       "active_connections": 847},
+        "system":     {"disk_usage_percent": 18, "disk_free_gb": 42,
+                       "iptables_drop_count": 0, "syn_flood_detected": False},
+    },
+    "grader": {
+        "root_cause_actions": [
+            {"action_type": "read_logs",     "target": "nginx"},
+            {"action_type": "check_metrics", "target": "api-server"},
+        ],
+        "fix_actions": [
+            {"action_type": "exec_command", "target": "certbot renew"},
+        ],
+        "trap_actions": [
+            {"action_type": "restart_service", "target": "api-server"},
+            {"action_type": "restart_service", "target": "nginx"},
+            {"action_type": "exec_command", "target": "iptables"},
+            {"action_type": "exec_command", "target": "fail2ban"},
+        ],
+        "restored_service": "nginx",
+    },
+}
+
+
 # Ordered list for easy iteration
-ALL_TASKS: list[dict[str, Any]] = [TASK1, TASK2, TASK3]
+ALL_TASKS: list[dict[str, Any]] = [TASK1, TASK2, TASK3, TASK4, TASK5]
 
 TASK_MAP: dict[str, dict[str, Any]] = {t["task_id"]: t for t in ALL_TASKS}

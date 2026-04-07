@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from ..models import IncidentAction, IncidentObservation, IncidentState
 from .environment import IncidentEnvironment
-from .graders import grade
+from .graders import grade, grade_detailed
 from .scenarios import ALL_TASKS
 
 # ──────────────────────────────────────────────
@@ -88,9 +88,9 @@ def root() -> HTMLResponse:
   <p class="subtitle">OpenEnv &mdash; Meta PyTorch Hackathon &bull; Production Server Debugging &bull; Agentic RL Training</p>
 
   <div class="grid">
-    <div class="stat"><div class="stat-val">3</div><div class="stat-label">Tasks (Easy / Medium / Hard)</div></div>
+    <div class="stat"><div class="stat-val">5</div><div class="stat-label">Tasks (1 Easy / 2 Medium / 2 Hard)</div></div>
     <div class="stat"><div class="stat-val">6</div><div class="stat-label">Action types</div></div>
-    <div class="stat"><div class="stat-val">1.0</div><div class="stat-label">Baseline score (rule-based avg)</div></div>
+    <div class="stat"><div class="stat-val">0.99</div><div class="stat-label">Baseline score (rule-based avg)</div></div>
     <div class="stat"><div class="stat-val">&#x2714;</div><div class="stat-label">OpenEnv-compatible API</div></div>
   </div>
 
@@ -101,7 +101,11 @@ def root() -> HTMLResponse:
     <br/>
     <p><span class="badge medium">MEDIUM</span> <strong>task_2_leak</strong> &mdash; Worker has a memory leak after bad deploy v2.4.1. Fix: rollback (not restart).</p>
     <br/>
+    <p><span class="badge medium">MEDIUM</span> <strong>task_4_cache</strong> &mdash; Redis cache poisoned by bad serialization format. 62% of requests return 500. Fix: <code>FLUSHALL</code> (not restart).</p>
+    <br/>
     <p><span class="badge hard">HARD</span> <strong>task_3_cascade</strong> &mdash; Full outage. Postgres <code>max_connections=25</code> exhausted. Misleading nginx disk error as a trap. Fix: <code>ALTER SYSTEM SET max_connections = 200</code>.</p>
+    <br/>
+    <p><span class="badge hard">HARD</span> <strong>task_5_cert</strong> &mdash; TLS certificate expired. nginx returns 502. High connection count looks like DDoS (red herring). Fix: <code>certbot renew</code> + restart nginx.</p>
   </div>
 
   <div class="card">
@@ -258,6 +262,7 @@ def get_grader_score(request: GraderRequest | None = None) -> dict[str, Any]:
         )
 
     score = grade(state)
+    detailed = grade_detailed(state)
 
     return {
         "task_id":              state.task_id,
@@ -267,6 +272,8 @@ def get_grader_score(request: GraderRequest | None = None) -> dict[str, Any]:
         "root_cause_identified": state.root_cause_identified,
         "fix_applied":          state.fix_applied,
         "system_restored":      state.system_restored,
+        "breakdown":            detailed["breakdown"],
+        "penalties":            detailed["penalties"],
     }
 
 
@@ -277,35 +284,59 @@ def get_grader_score(request: GraderRequest | None = None) -> dict[str, Any]:
 @app.post("/baseline")
 def run_baseline() -> dict[str, Any]:
     """
-    Run a deterministic rule-based baseline agent against all 3 tasks.
+    Run a deterministic rule-based baseline agent against all 5 tasks.
     Returns reproducible scores for the pre-submission checklist.
 
-    The baseline agent follows a simple policy:
-      Task 1: read api-server logs → restart api-server
-      Task 2: check worker metrics → check worker logs → rollback worker
-      Task 3: check postgres metrics → read postgres logs →
-              exec ALTER SYSTEM SET max_connections = 200 →
-              exec pg_reload_conf
+    The baseline agent is NOT an oracle — it applies shallow, fixed rules
+    that a naive script would use.  It fixes every task but skips deeper
+    investigation steps on harder tasks, so partial-credit scores vary by
+    difficulty:
+
+      Task 1 (easy):   read api-server logs → restart             → ~0.99
+      Task 2 (medium): read worker logs → rollback                 → ~0.85
+                       (skips check_metrics → loses metrics credit)
+      Task 3 (hard):   check postgres metrics → exec fix commands  → ~0.80
+                       (skips read_logs → loses investigation credit)
+      Task 4 (medium): read api-server logs → FLUSHALL             → ~0.65
+                       (never inspects redis → loses redis credits)
+      Task 5 (hard):   read nginx logs → certbot renew → restart   → ~0.80
+                       (skips openssl check → loses cert-check credit)
     """
     results: list[dict[str, Any]] = []
 
     from .scenarios import TASK_MAP
 
     policies: dict[str, list[IncidentAction]] = {
+        # Task 1 (easy): logs clearly show OOM → restart.
         "task_1_oom": [
             IncidentAction(action_type="read_logs",       target="api-server"),
             IncidentAction(action_type="restart_service", target="api-server"),
         ],
+        # Task 2 (medium): reads logs and rolls back; skips check_metrics.
+        # Missing diagnosis_worker_metrics credit (0.15).
         "task_2_leak": [
-            IncidentAction(action_type="check_metrics", target="worker"),
-            IncidentAction(action_type="read_logs",     target="worker"),
-            IncidentAction(action_type="rollback",      target="worker"),
+            IncidentAction(action_type="read_logs",  target="worker"),
+            IncidentAction(action_type="rollback",   target="worker"),
         ],
+        # Task 3 (hard): checks nginx first (wrong service), then jumps to the fix.
+        # Misses postgres investigation → no investigation_postgres or root_cause credit.
         "task_3_cascade": [
-            IncidentAction(action_type="check_metrics",  target="postgres"),
-            IncidentAction(action_type="read_logs",      target="postgres"),
-            IncidentAction(action_type="exec_command",   target="ALTER SYSTEM SET max_connections = 200"),
-            IncidentAction(action_type="exec_command",   target="SELECT pg_reload_conf()"),
+            IncidentAction(action_type="check_metrics", target="nginx"),
+            IncidentAction(action_type="exec_command",  target="ALTER SYSTEM SET max_connections = 200"),
+            IncidentAction(action_type="exec_command",  target="SELECT pg_reload_conf()"),
+        ],
+        # Task 4 (medium): reads api-server logs and flushes cache.
+        # Never checks redis-specific metrics → no investigation_redis or diagnosis credit.
+        "task_4_cache": [
+            IncidentAction(action_type="read_logs",    target="api-server"),
+            IncidentAction(action_type="exec_command", target="redis-cli FLUSHALL"),
+        ],
+        # Task 5 (hard): reads nginx logs, renews cert, restarts nginx.
+        # Skips openssl diagnostic → no diagnosis_cert_check credit (0.20).
+        "task_5_cert": [
+            IncidentAction(action_type="read_logs",       target="nginx"),
+            IncidentAction(action_type="exec_command",    target="certbot renew --force-renewal"),
+            IncidentAction(action_type="restart_service", target="nginx"),
         ],
     }
 

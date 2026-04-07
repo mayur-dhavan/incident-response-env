@@ -277,7 +277,7 @@ def run_episode(
 
 
 def main() -> int:
-    """Run inference on all 3 tasks and print results."""
+    """Run inference on all tasks and print results."""
 
     # Validate required environment variables
     if not HF_TOKEN:
