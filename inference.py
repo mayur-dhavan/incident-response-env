@@ -325,22 +325,20 @@ def main() -> int:
 
     api_key = HF_TOKEN or os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
-        # Fall back to rule-based baseline if no API key
+        # Fall back to rule-based baseline if no API key.
+        # Still emit [START]/[STEP]*/[END] per hackathon spec.
         print("[!] No API key available. Running rule-based baseline.\n")
         resp = _post(f"{ENV_BASE_URL}/baseline")
-        results = resp.get("baseline_scores", [])
+        baseline_results = resp.get("baseline_scores", [])
+        for r in baseline_results:
+            tid = r.get("task_id", "unknown")
+            sc = float(r.get("score", 0.0))
+            st = int(r.get("steps_taken", 1))
+            log_start(task=tid, model="rule-based-baseline")
+            log_step(step=1, action="rule_based_baseline", reward=round(sc, 2), done=True, error=None)
+            log_end(success=sc > 0.0, steps=st, score=sc, rewards=[round(sc, 2)])
         avg = resp.get("average_score", 0.0)
-        print(f"  {'Task':<35} {'Diff':<8} {'Score':>6}  {'Steps':>5}  Restored")
-        print(f"{'~' * 60}")
-        for r in results:
-            mark = "+" if r.get("system_restored") else "!"
-            print(
-                f"  {r['title']:<35} {r['difficulty']:<8} "
-                f"{r['score']:>6.4f}  {r['steps_taken']:>5}  [{mark}]"
-            )
-        print(f"{'~' * 60}")
         print(f"  Average score: {avg:.4f}")
-        print(f"{'~' * 60}\n")
         return 0
 
     client = OpenAI(
