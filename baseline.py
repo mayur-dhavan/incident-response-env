@@ -1,7 +1,7 @@
 """
 Baseline inference script — LLM agent via OpenAI-compatible API.
 
-Runs an LLM against all 3 incident-response tasks and prints reproducible
+Runs an LLM against all 5 incident-response tasks and prints reproducible
 scores.  Works with any OpenAI-compatible endpoint: OpenAI, HuggingFace
 Inference, vLLM, Ollama, etc.
 
@@ -68,6 +68,17 @@ RULE_POLICIES: dict[str, list[dict[str, Any]]] = {
         {"action_type": "read_logs",      "target": "postgres", "parameters": {}},
         {"action_type": "exec_command",   "target": "ALTER SYSTEM SET max_connections = 200", "parameters": {}},
         {"action_type": "exec_command",   "target": "SELECT pg_reload_conf()", "parameters": {}},
+    ],
+    "task_4_cache": [
+        {"action_type": "read_logs",     "target": "redis",     "parameters": {}},
+        {"action_type": "check_metrics", "target": "redis",     "parameters": {}},
+        {"action_type": "exec_command",  "target": "redis-cli FLUSHALL", "parameters": {}},
+    ],
+    "task_5_cert": [
+        {"action_type": "read_logs",       "target": "nginx",   "parameters": {}},
+        {"action_type": "exec_command",    "target": "openssl s_client -connect api-server:8443", "parameters": {}},
+        {"action_type": "exec_command",    "target": "certbot renew --force-renewal", "parameters": {}},
+        {"action_type": "restart_service", "target": "nginx",   "parameters": {}},
     ],
 }
 

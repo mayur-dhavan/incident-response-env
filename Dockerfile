@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.11-slim
+FROM python:3.11-slim
 
 ARG PORT=7860
 ENV PORT=${PORT}

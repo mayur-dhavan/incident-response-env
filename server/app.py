@@ -90,7 +90,7 @@ def root() -> HTMLResponse:
   <div class="grid">
     <div class="stat"><div class="stat-val">5</div><div class="stat-label">Tasks (1 Easy / 2 Medium / 2 Hard)</div></div>
     <div class="stat"><div class="stat-val">6</div><div class="stat-label">Action types</div></div>
-    <div class="stat"><div class="stat-val">0.99</div><div class="stat-label">Baseline score (rule-based avg)</div></div>
+    <div class="stat"><div class="stat-val">0.99</div><div class="stat-label">Baseline max score (rule-based)</div></div>
     <div class="stat"><div class="stat-val">&#x2714;</div><div class="stat-label">OpenEnv-compatible API</div></div>
   </div>
 
@@ -116,7 +116,7 @@ def root() -> HTMLResponse:
     <div class="endpoint"><span class="method post">POST</span><span class="path">/step</span><span class="desc">Execute action &mdash; body: <code>{"action":{"action_type":"read_logs","target":"api-server"}}</code></span></div>
     <div class="endpoint"><span class="method get">GET</span><span class="path">/state</span><span class="desc">Full episode state (for graders)</span></div>
     <div class="endpoint"><span class="method post">POST</span><span class="path">/grader</span><span class="desc">Score current episode</span></div>
-    <div class="endpoint"><span class="method post">POST</span><span class="path">/baseline</span><span class="desc">Run rule-based baseline on all 3 tasks</span></div>
+    <div class="endpoint"><span class="method post">POST</span><span class="path">/baseline</span><span class="desc">Run rule-based baseline on all 5 tasks</span></div>
     <div class="endpoint"><span class="method get">GET</span><span class="path">/docs</span><span class="desc">Interactive Swagger UI</span></div>
   </div>
 

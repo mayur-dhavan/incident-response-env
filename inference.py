@@ -1,7 +1,7 @@
 """
 inference.py — Hackathon-required inference script.
 
-Runs an LLM agent (via OpenAI-compatible API) against all 3 incident-response
+Runs an LLM agent (via OpenAI-compatible API) against all 5 incident-response
 tasks and prints reproducible scores.
 
 Required environment variables:
@@ -395,8 +395,8 @@ def main() -> int:
         print(f"[!] Scores out of range: {invalid}")
         return 1
 
-    if len(results) < 3:
-        print(f"[!] Expected 3 task scores, got {len(results)}")
+    if len(results) < 5:
+        print(f"[!] Expected 5 task scores, got {len(results)}")
         return 1
 
     print("[+] All scores valid (in [0.0, 1.0])")

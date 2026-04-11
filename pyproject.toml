@@ -22,6 +22,10 @@ server = "incident_response_env.server.app:main"
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --rootdir=tests"
+
 [tool.setuptools]
 include-package-data = true
 packages = ["incident_response_env", "incident_response_env.server"]
