@@ -1,7 +1,16 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from openenv.core.env_server import Action, Observation, State
 from pydantic import Field
+
+ACTION_TYPES = Literal[
+    "read_logs",
+    "check_metrics",
+    "restart_service",
+    "rollback",
+    "exec_command",
+    "check_network",
+]
 
 
 class IncidentAction(Action):
@@ -19,7 +28,7 @@ class IncidentAction(Action):
     parameters: optional extra kwargs (e.g. {"lines": 50} for read_logs)
     """
 
-    action_type: str = ""
+    action_type: ACTION_TYPES = "read_logs"
     target: str = ""
     parameters: Dict[str, Any] = Field(default_factory=dict)
 

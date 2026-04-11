@@ -4,3 +4,15 @@ type: space
 runtime: fastapi
 app: incident_response_env.server.app:app
 port: 7860
+description: >
+  Simulated production incident-response environment with 5 progressively
+  harder SRE debugging tasks (OOM crash, memory leak, cascading failure,
+  cache poisoning, TLS cert expiry).  Agents investigate via structured
+  observations, apply targeted fixes, and are graded on root-cause analysis,
+  correct remediation, and step efficiency.
+author: mayur6901
+tags:
+  - incident-response
+  - sre
+  - debugging
+  - reinforcement-learning

@@ -75,14 +75,35 @@ class IncidentEnvironment(Environment):
         )
 
         max_steps: int = scenario.get("max_steps", 15)
+
+        # Count unhealthy services for severity assessment
+        down_count = sum(1 for s in self._services.values() if s["status"] == "down")
+        degraded_count = sum(1 for s in self._services.values() if s["status"] == "degraded")
+        severity = "SEV-1 (CRITICAL)" if down_count >= 2 else "SEV-2 (HIGH)" if down_count >= 1 else "SEV-3 (MEDIUM)"
+
         return IncidentObservation(
             output=(
-                f"Incident Response Environment — Task: {scenario['title']}\n\n"
+                f"═══ INCIDENT ALERT ═══\n"
+                f"Task: {scenario['title']}\n"
+                f"Severity: {severity}\n"
                 f"Difficulty: {scenario['difficulty'].upper()}\n\n"
-                f"{scenario['description']}\n\n"
-                f"Available actions: read_logs, check_metrics, restart_service, "
-                f"rollback, exec_command, check_network\n\n"
-                f"System snapshot:\n{self._format_services()}\n\n"
+                f"Description:\n{scenario['description']}\n\n"
+                f"Impact: {down_count} service(s) DOWN, {degraded_count} service(s) DEGRADED\n\n"
+                f"── Current Service Status ──\n"
+                f"{self._format_services()}\n\n"
+                f"── Available Actions ──\n"
+                f"  read_logs <service>      — View recent logs for a service\n"
+                f"  check_metrics <service>  — View CPU/memory/latency/error metrics\n"
+                f"  restart_service <service> — Restart a service process\n"
+                f"  rollback <service>       — Roll back to the previous deployment\n"
+                f"  exec_command <command>   — Run a shell/SQL command\n"
+                f"  check_network <target>   — Check network connectivity\n\n"
+                f"Services: api-server, postgres, redis, worker, nginx\n\n"
+                f"── Recommended Approach ──\n"
+                f"1. INVESTIGATE first — read logs and check metrics to find the root cause\n"
+                f"2. DIAGNOSE — identify which service is the source of the problem\n"
+                f"3. FIX — apply the targeted fix (restart, rollback, or exec_command)\n"
+                f"⚠ Blind restarts without investigation will incur score penalties.\n\n"
                 f"[Step budget: {max_steps} steps]"
             ),
             services=copy.deepcopy(self._services),
@@ -201,22 +222,57 @@ class IncidentEnvironment(Environment):
             )
         lines = action.parameters.get("lines", 20)
         log_lines = self._logs[svc][-int(lines):]
-        output = f"=== Logs: {svc} (last {len(log_lines)} lines) ===\n" + "\n".join(log_lines)
+
+        svc_status = self._services.get(svc, {}).get("status", "unknown")
+        error_count = sum(1 for l in log_lines if "ERROR" in l or "FATAL" in l)
+        warn_count = sum(1 for l in log_lines if "WARN" in l)
+
+        output_parts = [
+            f"── Logs: {svc} (last {len(log_lines)} lines) ──",
+            f"Service status: {svc_status.upper()} | Errors in log: {error_count} | Warnings: {warn_count}",
+            "",
+            *log_lines,
+        ]
+
+        # Add contextual analysis hint based on log content
+        hint = self._get_log_hint(svc, log_lines)
+        if hint:
+            output_parts.append(f"\n── Analysis ──\n{hint}")
 
         # Check if this reveals root cause
         self._check_root_cause_revealed(action)
 
-        return IncidentObservation(output=output, services=copy.deepcopy(self._services))
+        return IncidentObservation(output="\n".join(output_parts), services=copy.deepcopy(self._services))
 
     def _handle_check_metrics(self, action: IncidentAction) -> IncidentObservation:
         svc = action.target
         if svc == "all":
-            metrics_str = "\n".join(
-                f"  {s}: {m}" for s, m in self._metrics.items()
-            )
-            output = f"=== All Metrics ===\n{metrics_str}"
+            parts = ["── Metrics: All Services ──"]
+            for s, m in self._metrics.items():
+                status = self._services.get(s, {}).get("status", "unknown")
+                parts.append(f"\n  [{s}] (status: {status})")
+                if isinstance(m, dict):
+                    for k, v in m.items():
+                        parts.append(f"    {k}: {v}")
+                else:
+                    parts.append(f"    {m}")
+            output = "\n".join(parts)
         elif svc in self._metrics:
-            output = f"=== Metrics: {svc} ===\n{self._metrics[svc]}"
+            m = self._metrics[svc]
+            status = self._services.get(svc, {}).get("status", "unknown")
+            parts = [f"── Metrics: {svc} (status: {status}) ──"]
+            if isinstance(m, dict):
+                for k, v in m.items():
+                    parts.append(f"  {k}: {v}")
+            else:
+                parts.append(f"  {m}")
+
+            # Add contextual hint based on metrics
+            hint = self._get_metrics_hint(svc, m)
+            if hint:
+                parts.append(f"\n── Analysis ──\n{hint}")
+
+            output = "\n".join(parts)
         else:
             return IncidentObservation(
                 output=f"No metrics for '{svc}'. Available: {', '.join(self._metrics)}, all",
@@ -479,7 +535,10 @@ class IncidentEnvironment(Environment):
 
         else:
             output_lines.append(f"Command executed: {cmd}")
-            output_lines.append("(No specific simulation for this command in current task)")
+            output_lines.append("(No specific simulation for this command in the current task.)")
+            output_lines.append("")
+            output_lines.append("Hint: Use read_logs or check_metrics first to identify the root cause,")
+            output_lines.append("then apply the appropriate fix (restart_service, rollback, or exec_command).")
 
         return IncidentObservation(
             output="\n".join(output_lines),
@@ -548,6 +607,46 @@ class IncidentEnvironment(Environment):
         """Mark system_restored if all services are healthy after an action."""
         if all(s["status"] == "healthy" for s in self._services.values()):
             self._state.system_restored = True
+
+    def _get_log_hint(self, svc: str, log_lines: list) -> str:
+        """Return a contextual hint based on log content to guide the agent."""
+        text = "\n".join(str(l) for l in log_lines).lower()
+        hints = []
+        if "oom" in text or "out of memory" in text or "memory" in text:
+            hints.append("Memory-related errors detected — consider rollback if a recent deployment caused this.")
+        if "connection refused" in text or "timeout" in text or "unreachable" in text:
+            hints.append("Network/connectivity issues detected — check_network or check dependent services.")
+        if "crash" in text or "fatal" in text or "segfault" in text:
+            hints.append("Service crash detected — restart_service or rollback may be needed.")
+        if "certificate" in text or "ssl" in text or "tls" in text:
+            hints.append("TLS/certificate issues found — check certificate expiry and renewal.")
+        if "cache" in text or "miss" in text or "evict" in text:
+            hints.append("Cache-related issues — check_metrics for cache hit rates.")
+        if not hints:
+            hints.append("Review the log entries above for error patterns.")
+        return "\n".join(f"  • {h}" for h in hints)
+
+    def _get_metrics_hint(self, svc: str, metrics) -> str:
+        """Return a contextual hint based on metric values."""
+        if not isinstance(metrics, dict):
+            return ""
+        hints = []
+        for k, v in metrics.items():
+            kl = k.lower()
+            if isinstance(v, (int, float)):
+                if "memory" in kl and v > 85:
+                    hints.append(f"{k} is critically high ({v}) — possible memory leak.")
+                elif "cpu" in kl and v > 90:
+                    hints.append(f"{k} is critically high ({v}) — check for runaway processes.")
+                elif "error" in kl and v > 0.5:
+                    hints.append(f"{k} is elevated ({v}) — investigate error source.")
+                elif "5xx" in kl and v > 0.1:
+                    hints.append(f"{k} is elevated ({v}) — upstream service errors likely.")
+                elif "hit_rate" in kl and v < 0.5:
+                    hints.append(f"{k} is low ({v}) — cache may need warming or resizing.")
+        if not hints:
+            return ""
+        return "\n".join(f"  • {h}" for h in hints)
 
     def _format_services(self) -> str:
         lines = []

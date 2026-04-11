@@ -253,6 +253,18 @@ _DETAILED_MAP = {
 }
 
 
+# Optimal step counts per task for efficiency bonus
+_OPTIMAL_STEPS = {
+    "task_1_oom":     2,   # read_logs → restart
+    "task_2_leak":    3,   # investigate → rollback → verify
+    "task_3_cascade": 4,   # investigate → ALTER SYSTEM → pg_reload → verify
+    "task_4_cache":   3,   # investigate → FLUSHALL → verify
+    "task_5_cert":    4,   # investigate → openssl → certbot renew → restart nginx
+}
+
+_EFFICIENCY_BONUS = 0.05  # bonus for completing at or under optimal steps
+
+
 def grade(state: "IncidentState") -> float:
     """Grade the current episode and return score in (0.0, 1.0) exclusive.
 
@@ -263,6 +275,10 @@ def grade(state: "IncidentState") -> float:
     if grader_fn is None:
         raise ValueError(f"Unknown task_id: {state.task_id!r}")
     raw = grader_fn(state)
+    # Step-efficiency bonus
+    optimal = _OPTIMAL_STEPS.get(state.task_id, 99)
+    if len(state.actions_taken) <= optimal and raw >= 0.5:
+        raw += _EFFICIENCY_BONUS
     return round(max(0.01, min(raw, 0.99)), 4)
 
 
@@ -272,5 +288,17 @@ def grade_detailed(state: "IncidentState") -> dict[str, Any]:
     if detail_fn is None:
         raise ValueError(f"Unknown task_id: {state.task_id!r}")
     result = detail_fn(state)
-    result["score"] = round(max(0.01, min(result["raw_score"], 0.99)), 4)
+    raw = result["raw_score"]
+    # Step-efficiency bonus
+    optimal = _OPTIMAL_STEPS.get(state.task_id, 99)
+    steps = len(state.actions_taken)
+    if steps <= optimal and raw >= 0.5:
+        result["breakdown"]["step_efficiency_bonus"] = _EFFICIENCY_BONUS
+        raw += _EFFICIENCY_BONUS
+        result["raw_score"] = round(raw, 4)
+    else:
+        result["breakdown"]["step_efficiency_bonus"] = 0.0
+    result["steps_taken"] = steps
+    result["optimal_steps"] = optimal
+    result["score"] = round(max(0.01, min(raw, 0.99)), 4)
     return result

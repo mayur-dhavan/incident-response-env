@@ -141,6 +141,17 @@ curl -X POST $BASE/grader</div>
   </div>
 
   <div class="card">
+    <h2>Scoring Rubric</h2>
+    <p style="margin-bottom:.75rem">Each task is graded on a composable rubric (0.0&ndash;1.0):</p>
+    <p><strong>Investigation</strong> (10&ndash;40%) &mdash; Did the agent read logs / check metrics for the correct services?</p><br/>
+    <p><strong>Root Cause</strong> (15&ndash;20%) &mdash; Was the root cause service correctly identified?</p><br/>
+    <p><strong>Fix Applied</strong> (20&ndash;30%) &mdash; Was the correct remediation action taken (restart vs rollback vs exec_command)?</p><br/>
+    <p><strong>System Restored</strong> (30%) &mdash; Are all services healthy after the fix?</p><br/>
+    <p><strong>Step Efficiency</strong> (+5% bonus) &mdash; Solve within optimal step count for a bonus.</p><br/>
+    <p><strong>Penalties</strong> (&minus;5 to &minus;20%) &mdash; Blind restarts, chasing red herrings, fixing symptoms instead of root cause.</p>
+  </div>
+
+  <div class="card">
     <h2>Run the demo locally</h2>
     <div class="codeblock">git clone https://github.com/mayur-dhavan/incident-response-env
 cd incident-response-env
